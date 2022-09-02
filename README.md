@@ -1,5 +1,7 @@
 Windows only
 
+![image](https://user-images.githubusercontent.com/8261057/188181297-8ffff80b-6d21-44a5-9c11-3bc962900919.png)
+
 use build-windowless.sh to build it without a console window
 
 To figure out mouse keys change the code to output it for you.
