@@ -8,6 +8,7 @@ To figure out mouse keys change the code to output it for you.
 
 Run as administrator
 
+```
 Usage of muteiny.exe:
   -h value
         Alias of -holdtime (default 150)
@@ -25,5 +26,6 @@ Usage of muteiny.exe:
         Specify mouse keybind in format 524 (up) !set both mouse up and down for it to work!
   -mu value
         Alias of -mouseup
+```
 
 ./Muteiny.exe -k VK_G -md 523 -mu 524
