@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"time"
 
 	"github.com/getlantern/systray"
 	"github.com/go-ole/go-ole"
@@ -87,9 +88,25 @@ func (f *MouseFlag) String() string {
 	return fmt.Sprintf("%v", f.Value)
 }
 
+type HoldFlag struct {
+	Value int
+	IsSet bool
+}
+
+func (f *HoldFlag) Set(value string) (err error) {
+	f.Value, _ = strconv.Atoi(value)
+	f.IsSet = true
+	return
+}
+
+func (f *HoldFlag) String() string {
+	return fmt.Sprintf("%v", f.Value)
+}
+
 var keyboardFlag KeyboardFlag
 var mouseDownFlag MouseFlag
 var mouseUpFlag MouseFlag
+var holdFlag HoldFlag = HoldFlag{Value: 150, IsSet: false}
 
 func main() {
 
@@ -103,6 +120,8 @@ func main() {
 	f.Var(&mouseDownFlag, "md", "Alias of -mousedown")
 	f.Var(&mouseUpFlag, "mouseup", "Specify mouse keybind in format 524 (up) !set both mouse up and down for it to work!")
 	f.Var(&mouseUpFlag, "mu", "Alias of -mouseup")
+	f.Var(&holdFlag, "holdtime", "Specify the time in milliseconds to keep the mic open after release (default 150)")
+	f.Var(&holdFlag, "h", "Alias of -holdtime")
 	f.Parse(os.Args[1:])
 
 	fmt.Println(keyboardFlag)
@@ -206,6 +225,7 @@ func onReady() {
 	if keyboardFlag.IsSet {
 		systray.AddMenuItem("Hooked Key: '"+keyboardFlag.Value+"'", "Hooked Keyboard Button")
 	}
+	systray.AddMenuItem("Hold Time: "+fmt.Sprint(holdFlag.Value)+"ms", "Mic Hold Time")
 	// go func() {
 	// 	<-test.ClickedCh
 	// 	systray.SetTemplateIcon(icons.MicMute, icons.MicMute)
@@ -224,7 +244,6 @@ func onExit() {
 }
 
 func runMouse(aev *wca.IAudioEndpointVolume, mouseDown int, mouseUp int) error {
-	// Buffer size is depends on your need. The 100 is placeholder value.
 	mouseChan := make(chan types.MouseEvent, 1)
 
 	if err := mouse.Install(nil, mouseChan); err != nil {
@@ -246,9 +265,6 @@ func runMouse(aev *wca.IAudioEndpointVolume, mouseDown int, mouseUp int) error {
 
 	for {
 		select {
-		// case <-time.After(5 * time.Minute):
-		// 	fmt.Println("Received timeout signal")
-		// 	return nil
 		case <-signalChan:
 			fmt.Println("Received shutdown signal")
 			return nil
@@ -259,14 +275,12 @@ func runMouse(aev *wca.IAudioEndpointVolume, mouseDown int, mouseUp int) error {
 				SetMute(aev, false)
 			} else if keyNumber == mouseUp {
 				fmt.Printf("Up %v\n", int(m.Message))
+				time.Sleep(time.Duration(holdFlag.Value) * time.Millisecond)
 				SetMute(aev, true)
 			}
 			continue
 		}
 	}
-
-	// not reached
-	return nil
 }
 
 func runKeyboard(aev *wca.IAudioEndpointVolume, keybind string) error {
@@ -291,9 +305,6 @@ func runKeyboard(aev *wca.IAudioEndpointVolume, keybind string) error {
 
 	for {
 		select {
-		// case <-time.After(5 * time.Minute):
-		// 	fmt.Println("Received timeout signal")
-		// 	return nil
 		case <-signalChan:
 			fmt.Println("Received shutdown signal")
 			return nil
@@ -305,13 +316,11 @@ func runKeyboard(aev *wca.IAudioEndpointVolume, keybind string) error {
 					SetMute(aev, false)
 				} else if fmt.Sprint(k.Message) == "WM_KEYUP" {
 					fmt.Printf("Up %v\n", k.VKCode)
+					time.Sleep(time.Duration(holdFlag.Value) * time.Millisecond)
 					SetMute(aev, true)
 				}
 			}
 			continue
 		}
 	}
-
-	// not reached
-	return nil
 }
