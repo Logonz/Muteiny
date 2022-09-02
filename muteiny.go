@@ -215,7 +215,7 @@ func main() {
 }
 
 func onReady() {
-	systray.SetTemplateIcon(icons.Mic, icons.Mic)
+	systray.SetTemplateIcon(icons.MicMute, icons.MicMute)
 	systray.SetTitle("Muteiny")
 	systray.SetTooltip("Muteiny")
 	if mouseDownFlag.IsSet && mouseUpFlag.IsSet {
