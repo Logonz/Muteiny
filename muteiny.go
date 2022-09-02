@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strconv"
 	"time"
 
 	"github.com/getlantern/systray"
@@ -17,27 +16,6 @@ import (
 	"github.com/moutend/go-hook/pkg/types"
 	"github.com/moutend/go-wca/pkg/wca"
 )
-
-type MuteFlag struct {
-	Value bool
-	IsSet bool
-}
-
-func (f *MuteFlag) Set(value string) (err error) {
-	if value != "true" && value != "false" {
-		err = fmt.Errorf("set 'true' or 'false'")
-		return
-	}
-	if value == "true" {
-		f.Value = true
-	}
-	f.IsSet = true
-	return
-}
-
-func (f *MuteFlag) String() string {
-	return fmt.Sprintf("%v", f.Value)
-}
 
 func SetMute(aev *wca.IAudioEndpointVolume, mute bool) error {
 	var currentMute bool
@@ -58,51 +36,7 @@ func SetMute(aev *wca.IAudioEndpointVolume, mute bool) error {
 	return nil
 }
 
-type KeyboardFlag struct {
-	Value string
-	IsSet bool
-}
-
-func (f *KeyboardFlag) Set(value string) (err error) {
-	f.Value = value
-	f.IsSet = true
-	return
-}
-
-func (f *KeyboardFlag) String() string {
-	return fmt.Sprintf("%v", f.Value)
-}
-
-type MouseFlag struct {
-	Value int
-	IsSet bool
-}
-
-func (f *MouseFlag) Set(value string) (err error) {
-	f.Value, _ = strconv.Atoi(value)
-	f.IsSet = true
-	return
-}
-
-func (f *MouseFlag) String() string {
-	return fmt.Sprintf("%v", f.Value)
-}
-
-type HoldFlag struct {
-	Value int
-	IsSet bool
-}
-
-func (f *HoldFlag) Set(value string) (err error) {
-	f.Value, _ = strconv.Atoi(value)
-	f.IsSet = true
-	return
-}
-
-func (f *HoldFlag) String() string {
-	return fmt.Sprintf("%v", f.Value)
-}
-
+//Keep these as globals, simple program no real use to pass them around everywhere
 var keyboardFlag KeyboardFlag
 var mouseDownFlag MouseFlag
 var mouseUpFlag MouseFlag
@@ -113,6 +47,7 @@ func main() {
 	log.SetFlags(0)
 	log.SetPrefix("error: ")
 
+	// Load the args
 	f := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	f.Var(&keyboardFlag, "keybind", "Specify keybind in format VK_A")
 	f.Var(&keyboardFlag, "k", "Alias of -keybind")
@@ -124,8 +59,7 @@ func main() {
 	f.Var(&holdFlag, "h", "Alias of -holdtime")
 	f.Parse(os.Args[1:])
 
-	fmt.Println(keyboardFlag)
-
+	//? Here start the fetching of the default communications device
 	if err := ole.CoInitializeEx(0, ole.COINIT_APARTMENTTHREADED); err != nil {
 		return
 	}
@@ -137,6 +71,7 @@ func main() {
 	}
 	defer mmde.Release()
 
+	//? Get the default communications device
 	var mmd *wca.IMMDevice
 	if err := mmde.GetDefaultAudioEndpoint(wca.ECapture, wca.DEVICE_STATE_ACTIVE, &mmd); err != nil {
 		return
@@ -149,6 +84,7 @@ func main() {
 	}
 	defer ps.Release()
 
+	//? Get the name of the communication device
 	var pv wca.PROPVARIANT
 	if err := ps.GetValue(&wca.PKEY_Device_FriendlyName, &pv); err != nil {
 		return
@@ -156,12 +92,14 @@ func main() {
 
 	fmt.Printf("%s\n", pv.String())
 
+	//? Get the audio endpoint to control the settings of the device.
 	var aev *wca.IAudioEndpointVolume
 	if err := mmd.Activate(wca.IID_IAudioEndpointVolume, wca.CLSCTX_ALL, nil, &aev); err != nil {
 		return
 	}
 	defer aev.Release()
 
+	// Mute the mic on startup
 	var mute bool
 	if err := aev.GetMute(&mute); err != nil {
 		return
@@ -173,12 +111,6 @@ func main() {
 		fmt.Println("Muting mic!")
 	}
 
-	// go func() {
-	// 	if err := runMouse(aev, 523, 524); err != nil {
-	// 		log.Fatal(err)
-	// 	}
-	// }()
-
 	if mouseDownFlag.IsSet && mouseUpFlag.IsSet {
 		go func() {
 			if err := runMouse(aev, mouseDownFlag.Value, mouseUpFlag.Value); err != nil {
@@ -189,20 +121,15 @@ func main() {
 
 	if keyboardFlag.IsSet {
 		go func() {
-			if err := runKeyboard(aev, keyboardFlag.Value); err != nil {
+			if err := runKeyboard(aev, keyboardFlag.Value); err != nil { //? Mouse3 Down: 523, Mouse3 Up: 524
 				log.Fatal(err)
 			}
 		}()
 	}
 
-	systray.Run(onReady, onExit)
+	systray.Run(onReady, nil)
 
-	// reader := bufio.NewReader(os.Stdin)
-	// _, _, err := reader.ReadRune() // print out the unicode value i.e. A -> 65, a -> 97
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-
+	//? Unmute the microphone on exit
 	if err := aev.GetMute(&mute); err != nil {
 		return
 	}
@@ -218,6 +145,8 @@ func onReady() {
 	systray.SetTemplateIcon(icons.MicMute, icons.MicMute)
 	systray.SetTitle("Muteiny")
 	systray.SetTooltip("Muteiny")
+
+	//* A little hacky but add information about the program state through menuitems.
 	if mouseDownFlag.IsSet && mouseUpFlag.IsSet {
 		systray.AddMenuItem("MouseDown: "+fmt.Sprint(mouseDownFlag.Value), "Hooked Mouse Button Down")
 		systray.AddMenuItem("MouseUp: "+fmt.Sprint(mouseUpFlag.Value), "Hooked Mouse Button Up")
@@ -226,10 +155,7 @@ func onReady() {
 		systray.AddMenuItem("Hooked Key: '"+keyboardFlag.Value+"'", "Hooked Keyboard Button")
 	}
 	systray.AddMenuItem("Hold Time: "+fmt.Sprint(holdFlag.Value)+"ms", "Mic Hold Time")
-	// go func() {
-	// 	<-test.ClickedCh
-	// 	systray.SetTemplateIcon(icons.MicMute, icons.MicMute)
-	// }()
+
 	mQuitOrig := systray.AddMenuItem("Quit", "Quit Muteify")
 	go func() {
 		<-mQuitOrig.ClickedCh
@@ -237,10 +163,6 @@ func onReady() {
 		systray.Quit()
 		fmt.Println("Finished quitting")
 	}()
-}
-
-func onExit() {
-	// clean up here
 }
 
 func runMouse(aev *wca.IAudioEndpointVolume, mouseDown int, mouseUp int) error {
