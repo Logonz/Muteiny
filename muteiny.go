@@ -87,11 +87,11 @@ func (f *MouseFlag) String() string {
 	return fmt.Sprintf("%v", f.Value)
 }
 
-func main() {
+var keyboardFlag KeyboardFlag
+var mouseDownFlag MouseFlag
+var mouseUpFlag MouseFlag
 
-	var keyboardFlag KeyboardFlag
-	var mouseDownFlag MouseFlag
-	var mouseUpFlag MouseFlag
+func main() {
 
 	log.SetFlags(0)
 	log.SetPrefix("error: ")
@@ -197,9 +197,15 @@ func main() {
 
 func onReady() {
 	systray.SetTemplateIcon(icons.Mic, icons.Mic)
-	systray.SetTitle("Muteify")
-	systray.SetTooltip("Muteify")
-	// test := systray.AddMenuItem("Test", "Teeest")
+	systray.SetTitle("Muteiny")
+	systray.SetTooltip("Muteiny")
+	if mouseDownFlag.IsSet && mouseUpFlag.IsSet {
+		systray.AddMenuItem("MouseDown: "+fmt.Sprint(mouseDownFlag.Value), "Hooked Mouse Button Down")
+		systray.AddMenuItem("MouseUp: "+fmt.Sprint(mouseUpFlag.Value), "Hooked Mouse Button Up")
+	}
+	if keyboardFlag.IsSet {
+		systray.AddMenuItem("Hooked Key: '"+keyboardFlag.Value+"'", "Hooked Keyboard Button")
+	}
 	// go func() {
 	// 	<-test.ClickedCh
 	// 	systray.SetTemplateIcon(icons.MicMute, icons.MicMute)
