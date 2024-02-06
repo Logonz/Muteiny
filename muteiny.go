@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime"
 	"time"
 
 	"github.com/getlantern/systray"
@@ -23,9 +24,12 @@ func SetMute(aev *wca.IAudioEndpointVolume, mute bool) error {
 		return err
 	}
 	if currentMute != mute {
-		if err := aev.SetMute(mute, nil); err != nil {
-			return err
-		}
+		do(func() {
+			if err := aev.SetMute(mute, nil); err != nil {
+				// fmt.Println("this row is required, wtf?") //? If this row is not here, the program will crash when you try to mute the mic (it is not needed in golang 1.16)
+				return
+			}
+		})
 		if !mute {
 			systray.SetTemplateIcon(icons.Mic, icons.Mic)
 		} else {
@@ -57,12 +61,29 @@ func SetVolumeLevel(aev *wca.IAudioEndpointVolume, volumeLevel float32) error {
 	return nil
 }
 
-//Keep these as globals, simple program no real use to pass them around everywhere
+// Keep these as globals, simple program no real use to pass them around everywhere
 var keyboardFlag KeyboardFlag
 var mouseDownFlag MouseFlag
 var mouseUpFlag MouseFlag
 var holdFlag HoldFlag = HoldFlag{Value: 150, IsSet: false}
 var volumeFlag bool
+
+func init() {
+	runtime.LockOSThread()
+}
+
+// queue of work to run in main thread.
+var mainfunc = make(chan func())
+
+// do runs f on the main thread.
+func do(f func()) {
+	done := make(chan bool, 1)
+	mainfunc <- func() {
+		f()
+		done <- true
+	}
+	<-done
+}
 
 func main() {
 
@@ -164,7 +185,11 @@ func main() {
 		}()
 	}
 
-	systray.Run(onReady, nil)
+	go systray.Run(onReady, nil)
+
+	for f := range mainfunc {
+		f()
+	}
 
 	if !volumeFlag {
 		//? Unmute the microphone on exit
@@ -203,6 +228,7 @@ func onReady() {
 	mQuitOrig := systray.AddMenuItem("Quit", "Quit Muteify")
 	go func() {
 		<-mQuitOrig.ClickedCh
+		close(mainfunc)
 		fmt.Println("Requesting quit")
 		systray.Quit()
 		fmt.Println("Finished quitting")
