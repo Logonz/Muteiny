@@ -36,11 +36,33 @@ func SetMute(aev *wca.IAudioEndpointVolume, mute bool) error {
 	return nil
 }
 
+var volumeLevel float32
+
+func SetVolumeLevel(aev *wca.IAudioEndpointVolume, volumeLevel float32) error {
+	var currentVolumeLevel float32
+	if err := aev.GetMasterVolumeLevel(&currentVolumeLevel); err != nil {
+		return err
+	}
+	if currentVolumeLevel != volumeLevel {
+		if err := aev.SetMasterVolumeLevel(volumeLevel, nil); err != nil {
+			return err
+		}
+		if volumeLevel != 0 {
+			systray.SetTemplateIcon(icons.Mic, icons.Mic)
+		} else {
+			systray.SetTemplateIcon(icons.MicMute, icons.MicMute)
+		}
+		fmt.Printf("Volume Level set to:%v\n", volumeLevel)
+	}
+	return nil
+}
+
 //Keep these as globals, simple program no real use to pass them around everywhere
 var keyboardFlag KeyboardFlag
 var mouseDownFlag MouseFlag
 var mouseUpFlag MouseFlag
 var holdFlag HoldFlag = HoldFlag{Value: 150, IsSet: false}
+var volumeFlag bool
 
 func main() {
 
@@ -57,32 +79,33 @@ func main() {
 	f.Var(&mouseUpFlag, "mu", "Alias of -mouseup")
 	f.Var(&holdFlag, "holdtime", "Specify the time in milliseconds to keep the mic open after release (default 150)")
 	f.Var(&holdFlag, "h", "Alias of -holdtime")
+	f.BoolVar(&volumeFlag, "volume", false, "Set the volume to 0 instead of muting")
 	f.Parse(os.Args[1:])
 
 	//? Here start the fetching of the default communications device
 	if err := ole.CoInitializeEx(0, ole.COINIT_APARTMENTTHREADED); err != nil {
 		return
 	}
-	defer ole.CoUninitialize()
+	//defer ole.CoUninitialize()
 
 	var mmde *wca.IMMDeviceEnumerator
 	if err := wca.CoCreateInstance(wca.CLSID_MMDeviceEnumerator, 0, wca.CLSCTX_ALL, wca.IID_IMMDeviceEnumerator, &mmde); err != nil {
 		return
 	}
-	defer mmde.Release()
+	//defer mmde.Release()
 
 	//? Get the default communications device
 	var mmd *wca.IMMDevice
 	if err := mmde.GetDefaultAudioEndpoint(wca.ECapture, wca.DEVICE_STATE_ACTIVE, &mmd); err != nil {
 		return
 	}
-	defer mmd.Release()
+	//defer mmd.Release()
 
 	var ps *wca.IPropertyStore
 	if err := mmd.OpenPropertyStore(wca.STGM_READ, &ps); err != nil {
 		return
 	}
-	defer ps.Release()
+	//defer ps.Release()
 
 	//? Get the name of the communication device
 	var pv wca.PROPVARIANT
@@ -97,18 +120,32 @@ func main() {
 	if err := mmd.Activate(wca.IID_IAudioEndpointVolume, wca.CLSCTX_ALL, nil, &aev); err != nil {
 		return
 	}
-	defer aev.Release()
+	//defer aev.Release()
 
-	// Mute the mic on startup
-	var mute bool
-	if err := aev.GetMute(&mute); err != nil {
-		return
+	t := aev.GetMasterVolumeLevel(&volumeLevel)
+	if t != nil {
+		fmt.Println(t)
 	}
-	if !mute {
-		if err := aev.SetMute(true, nil); err != nil {
+
+	var mute bool
+	if !volumeFlag {
+		// Mute the mic on startup
+		if err := aev.GetMute(&mute); err != nil {
 			return
 		}
-		fmt.Println("Muting mic!")
+		if !mute {
+			if err := aev.SetMute(true, nil); err != nil {
+				return
+			}
+			fmt.Println("Mute mode")
+			fmt.Println("Muting mic!")
+		}
+	} else {
+		if err := aev.SetMasterVolumeLevel(0, nil); err != nil {
+			return
+		}
+		fmt.Println("Volume mode")
+		fmt.Println("Setting volume to 0!")
 	}
 
 	if mouseDownFlag.IsSet && mouseUpFlag.IsSet {
@@ -129,15 +166,22 @@ func main() {
 
 	systray.Run(onReady, nil)
 
-	//? Unmute the microphone on exit
-	if err := aev.GetMute(&mute); err != nil {
-		return
-	}
-	if mute {
-		if err := aev.SetMute(false, nil); err != nil {
+	if !volumeFlag {
+		//? Unmute the microphone on exit
+		if err := aev.GetMute(&mute); err != nil {
 			return
 		}
-		fmt.Println("Unmuting mic before shutdown!")
+		if mute {
+			if err := aev.SetMute(false, nil); err != nil {
+				return
+			}
+			fmt.Println("Unmuting mic before shutdown!")
+		}
+	} else {
+		if err := aev.SetMasterVolumeLevel(volumeLevel, nil); err != nil {
+			return
+		}
+		fmt.Println("Setting volume to original level before shutdown!")
 	}
 }
 
@@ -194,11 +238,19 @@ func runMouse(aev *wca.IAudioEndpointVolume, mouseDown int, mouseUp int) error {
 			keyNumber := int(m.Message)
 			if keyNumber == mouseDown {
 				fmt.Printf("Down %v\n", int(m.Message))
-				SetMute(aev, false)
+				if !volumeFlag {
+					SetMute(aev, false)
+				} else {
+					SetVolumeLevel(aev, volumeLevel)
+				}
 			} else if keyNumber == mouseUp {
 				fmt.Printf("Up %v\n", int(m.Message))
 				time.Sleep(time.Duration(holdFlag.Value) * time.Millisecond)
-				SetMute(aev, true)
+				if !volumeFlag {
+					SetMute(aev, true)
+				} else {
+					SetVolumeLevel(aev, 0)
+				}
 			}
 			continue
 		}
@@ -235,11 +287,19 @@ func runKeyboard(aev *wca.IAudioEndpointVolume, keybind string) error {
 			if fmt.Sprint(k.VKCode) == keybind {
 				if fmt.Sprint(k.Message) == "WM_KEYDOWN" {
 					fmt.Printf("Down %v\n", k.VKCode)
-					SetMute(aev, false)
+					if !volumeFlag {
+						SetMute(aev, false)
+					} else {
+						SetVolumeLevel(aev, volumeLevel)
+					}
 				} else if fmt.Sprint(k.Message) == "WM_KEYUP" {
 					fmt.Printf("Up %v\n", k.VKCode)
 					time.Sleep(time.Duration(holdFlag.Value) * time.Millisecond)
-					SetMute(aev, true)
+					if !volumeFlag {
+						SetMute(aev, true)
+					} else {
+						SetVolumeLevel(aev, 0)
+					}
 				}
 			}
 			continue
