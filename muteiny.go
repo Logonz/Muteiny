@@ -70,6 +70,7 @@ var mouseUpFlag MouseFlag
 var mouseData MouseFlag
 var holdFlag HoldFlag = HoldFlag{Value: 500, IsSet: false}
 var volumeFlag bool
+var bindMode bool
 
 // Locked the whole program, moved to the setmute function instead.
 // func init() {
@@ -107,6 +108,7 @@ func main() {
 	f.Var(&holdFlag, "holdtime", "Specify the time in milliseconds to keep the mic open after release (default 500)")
 	f.Var(&holdFlag, "h", "Alias of -holdtime")
 	f.BoolVar(&volumeFlag, "volume", false, "Set the volume to 0 instead of muting")
+	f.BoolVar(&bindMode, "keybindmode", false, "Set the program to bind mode, this will not mute the mic but instead write the binds to the console/binds.log to help you find the correct VK/Mouse codes")
 	f.Parse(os.Args[1:])
 
 	//? Here start the fetching of the default communications device
@@ -149,48 +151,63 @@ func main() {
 	}
 	//defer aev.Release()
 
-	t := aev.GetMasterVolumeLevel(&volumeLevel)
-	if t != nil {
-		fmt.Println(t)
+	if bindMode {
+		fmt.Println("Bind mode active")
+		// ? Set the flags to false so the program doesn't run the mute/volume mode
+		volumeFlag = false
+		keyboardFlag.IsSet = false
+		mouseUpFlag.IsSet = false
+		mouseDownFlag.IsSet = false
+		mouseData.IsSet = false
+		holdFlag.IsSet = false
+		// ? Run the bind mode
+		go findBindMode()
+	} else {
+		// ? Set the hold time to 500ms if it's not set
+		if !holdFlag.IsSet {
+			holdFlag.Set("500")
+		}
 	}
 
 	var mute bool
-	if !volumeFlag {
-		// Mute the mic on startup
-		if err := aev.GetMute(&mute); err != nil {
-			return
-		}
-		if !mute {
-			if err := aev.SetMute(true, nil); err != nil {
+	if !bindMode {
+		if !volumeFlag {
+			// Mute the mic on startup
+			if err := aev.GetMute(&mute); err != nil {
 				return
 			}
-			fmt.Println("Mute mode")
-			fmt.Println("Muting mic!")
-		}
-	} else {
-		if err := aev.SetMasterVolumeLevel(0, nil); err != nil {
-			return
-		}
-		fmt.Println("Volume mode")
-		fmt.Println("Setting volume to 0!")
-	}
-
-	if mouseDownFlag.IsSet && mouseUpFlag.IsSet {
-		fmt.Println("Mouse mode active")
-		go func() {
-			if err := runMouse(aev, mouseDownFlag.Value, mouseUpFlag.Value); err != nil {
-				log.Fatal(err)
+			if !mute {
+				if err := aev.SetMute(true, nil); err != nil {
+					return
+				}
+				fmt.Println("Mute mode")
+				fmt.Println("Muting mic!")
 			}
-		}()
-	}
-
-	if keyboardFlag.IsSet {
-		fmt.Println("Keyboard mode active")
-		go func() {
-			if err := runKeyboard(aev, keyboardFlag.Value); err != nil { //? Mouse3 Down: 523, Mouse3 Up: 524
-				log.Fatal(err)
+		} else {
+			if err := aev.SetMasterVolumeLevel(0, nil); err != nil {
+				return
 			}
-		}()
+			fmt.Println("Volume mode")
+			fmt.Println("Setting volume to 0!")
+		}
+
+		if mouseDownFlag.IsSet && mouseUpFlag.IsSet {
+			fmt.Println("Mouse mode active")
+			go func() {
+				if err := runMouse(aev, mouseDownFlag.Value, mouseUpFlag.Value); err != nil {
+					log.Fatal(err)
+				}
+			}()
+		}
+
+		if keyboardFlag.IsSet {
+			fmt.Println("Keyboard mode active")
+			go func() {
+				if err := runKeyboard(aev, keyboardFlag.Value); err != nil { //? Mouse3 Down: 523, Mouse3 Up: 524
+					log.Fatal(err)
+				}
+			}()
+		}
 	}
 
 	go systray.Run(onReady, nil)
@@ -199,22 +216,24 @@ func main() {
 		f()
 	}
 
-	if !volumeFlag {
-		//? Unmute the microphone on exit
-		if err := aev.GetMute(&mute); err != nil {
-			return
-		}
-		if mute {
-			if err := aev.SetMute(false, nil); err != nil {
+	if !bindMode {
+		if !volumeFlag {
+			//? Unmute the microphone on exit
+			if err := aev.GetMute(&mute); err != nil {
 				return
 			}
-			fmt.Println("Unmuting mic before shutdown!")
+			if mute {
+				if err := aev.SetMute(false, nil); err != nil {
+					return
+				}
+				fmt.Println("Unmuting mic before shutdown!")
+			}
+		} else {
+			if err := aev.SetMasterVolumeLevel(volumeLevel, nil); err != nil {
+				return
+			}
+			fmt.Println("Setting volume to original level before shutdown!")
 		}
-	} else {
-		if err := aev.SetMasterVolumeLevel(volumeLevel, nil); err != nil {
-			return
-		}
-		fmt.Println("Setting volume to original level before shutdown!")
 	}
 }
 
@@ -234,7 +253,12 @@ func onReady() {
 	if keyboardFlag.IsSet {
 		systray.AddMenuItem("Hooked Key: '"+keyboardFlag.Value+"'", "Hooked Keyboard Button")
 	}
-	systray.AddMenuItem("Hold Time: "+fmt.Sprint(holdFlag.Value)+"ms", "Mic Hold Time")
+	if holdFlag.IsSet {
+		systray.AddMenuItem("Hold Time: "+fmt.Sprint(holdFlag.Value)+"ms", "Mic Hold Time")
+	}
+	if bindMode {
+		systray.AddMenuItem("Bind Mode", "Bind Mode Active")
+	}
 
 	// Ctrl+C to quit
 	signalChan := make(chan os.Signal, 1)
@@ -282,7 +306,7 @@ func runMouse(aev *wca.IAudioEndpointVolume, mouseDown int, mouseUp int) error {
 	for {
 		select {
 		case <-signalChan:
-			fmt.Println("Received shutdown signal")
+			fmt.Println("Shutting down mouse listener")
 			return nil
 		case m := <-mouseChan:
 			//? Used to check for specific mouse data, eg. Mouse3 and Mouse4 have the same VK but different data
@@ -339,7 +363,7 @@ func runKeyboard(aev *wca.IAudioEndpointVolume, keybind string) error {
 	for {
 		select {
 		case <-signalChan:
-			fmt.Println("Received shutdown signal")
+			fmt.Println("Shutting down keyboard listener")
 			return nil
 		case k := <-keyboardChan:
 			// fmt.Printf("Received %v %v\n", k.Message, k.VKCode)
@@ -366,4 +390,78 @@ func runKeyboard(aev *wca.IAudioEndpointVolume, keybind string) error {
 			continue
 		}
 	}
+}
+
+func findBindMode() {
+	//* findBindMode is a function that captures keyboard and mouse input and prints the corresponding key codes.
+	//* It installs hooks for both mouse and keyboard events and listens for events until interrupted by a signal.
+	//* The function prints the key codes for mouse events and key down/up events.
+	//* To exit the function, press Ctrl+C.
+	//* This function is used in bind mode to help find the correct VK/Mouse codes for keybinds.
+	mouseChan := make(chan types.MouseEvent, 1)
+	keyboardChan := make(chan types.KeyboardEvent, 1)
+
+	if err := mouse.Install(nil, mouseChan); err != nil {
+		log.Fatal(err)
+	}
+	if err := keyboard.Install(nil, keyboardChan); err != nil {
+		log.Fatal(err)
+	}
+
+	defer mouse.Uninstall()
+	defer keyboard.Uninstall()
+
+	// Create a file to write the output
+	file, err := os.Create("./binds.log")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+
+	fmt.Println("Start capturing keyboard and mouse input")
+	go func() {
+		signalChan := make(chan os.Signal, 1)
+		signal.Notify(signalChan, os.Interrupt)
+		for {
+			select {
+			case <-signalChan:
+				fmt.Println("Shutting down mouse listener")
+				return
+			case m := <-mouseChan:
+				keyNumber := int(m.Message)
+				if keyNumber != 512 { //? This is mouse movement, we don't care about this
+					fmt.Println("Mouse VK:", keyNumber, "Data:", int(m.MouseData))
+					fmt.Fprintf(file, "Mouse VK: %d Data: %d\n", keyNumber, int(m.MouseData))
+				}
+				continue
+			}
+		}
+	}()
+
+	go func() {
+		signalChan := make(chan os.Signal, 1)
+		signal.Notify(signalChan, os.Interrupt)
+		for {
+			select {
+			case <-signalChan:
+				fmt.Println("Shutting down keyboard listener")
+				return
+			case k := <-keyboardChan:
+				if fmt.Sprint(k.Message) == "WM_KEYDOWN" {
+					fmt.Printf("Key Down VK %v %v\n", k.Message, k.VKCode)
+					fmt.Fprintf(file, "Key Down VK %v %v\n", k.Message, k.VKCode)
+				} else if fmt.Sprint(k.Message) == "WM_KEYUP" {
+					fmt.Printf("Key Up %v %v\n", k.Message, k.VKCode)
+					fmt.Fprintf(file, "Key Up %v %v\n", k.Message, k.VKCode)
+				}
+				continue
+			}
+		}
+	}()
+
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt)
+	fmt.Println("Press Ctrl+C to exit")
+	<-signalChan
+	fmt.Println("Stopped Bind Mode")
 }
