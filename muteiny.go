@@ -18,51 +18,6 @@ import (
 	"github.com/moutend/go-wca/pkg/wca"
 )
 
-func SetMute(aev *wca.IAudioEndpointVolume, mute bool) error {
-	var currentMute bool
-	if err := aev.GetMute(&currentMute); err != nil {
-		return err
-	}
-	if currentMute != mute {
-		do(func() {
-			runtime.LockOSThread()
-			if err := aev.SetMute(mute, nil); err != nil {
-				// fmt.Println("this row is required, wtf?") //? If this row is not here, the program will crash when you try to mute the mic (it is not needed in golang 1.16)
-				return
-			}
-			runtime.UnlockOSThread()
-		})
-		if !mute {
-			systray.SetTemplateIcon(icons.Mic, icons.Mic)
-		} else {
-			systray.SetTemplateIcon(icons.MicMute, icons.MicMute)
-		}
-		fmt.Printf("Mute State set to:%v\n", mute)
-	}
-	return nil
-}
-
-var volumeLevel float32
-
-func SetVolumeLevel(aev *wca.IAudioEndpointVolume, volumeLevel float32) error {
-	var currentVolumeLevel float32
-	if err := aev.GetMasterVolumeLevel(&currentVolumeLevel); err != nil {
-		return err
-	}
-	if currentVolumeLevel != volumeLevel {
-		if err := aev.SetMasterVolumeLevel(volumeLevel, nil); err != nil {
-			return err
-		}
-		if volumeLevel != 0 {
-			systray.SetTemplateIcon(icons.Mic, icons.Mic)
-		} else {
-			systray.SetTemplateIcon(icons.MicMute, icons.MicMute)
-		}
-		fmt.Printf("Volume Level set to:%v\n", volumeLevel)
-	}
-	return nil
-}
-
 // Keep these as globals, simple program no real use to pass them around everywhere
 var keyboardFlag KeyboardFlag
 var mouseDownFlag MouseFlag
@@ -281,6 +236,51 @@ func onReady() {
 		systray.Quit()
 		fmt.Println("Finished quitting")
 	}()
+}
+
+func SetMute(aev *wca.IAudioEndpointVolume, mute bool) error {
+	var currentMute bool
+	if err := aev.GetMute(&currentMute); err != nil {
+		return err
+	}
+	if currentMute != mute {
+		do(func() {
+			runtime.LockOSThread()
+			if err := aev.SetMute(mute, nil); err != nil {
+				// fmt.Println("this row is required, wtf?") //? If this row is not here, the program will crash when you try to mute the mic (it is not needed in golang 1.16)
+				return
+			}
+			runtime.UnlockOSThread()
+		})
+		if !mute {
+			systray.SetTemplateIcon(icons.Mic, icons.Mic)
+		} else {
+			systray.SetTemplateIcon(icons.MicMute, icons.MicMute)
+		}
+		fmt.Printf("Mute State set to:%v\n", mute)
+	}
+	return nil
+}
+
+var volumeLevel float32
+
+func SetVolumeLevel(aev *wca.IAudioEndpointVolume, volumeLevel float32) error {
+	var currentVolumeLevel float32
+	if err := aev.GetMasterVolumeLevel(&currentVolumeLevel); err != nil {
+		return err
+	}
+	if currentVolumeLevel != volumeLevel {
+		if err := aev.SetMasterVolumeLevel(volumeLevel, nil); err != nil {
+			return err
+		}
+		if volumeLevel != 0 {
+			systray.SetTemplateIcon(icons.Mic, icons.Mic)
+		} else {
+			systray.SetTemplateIcon(icons.MicMute, icons.MicMute)
+		}
+		fmt.Printf("Volume Level set to:%v\n", volumeLevel)
+	}
+	return nil
 }
 
 func runMouse(aev *wca.IAudioEndpointVolume, mouseDown int, mouseUp int) error {
