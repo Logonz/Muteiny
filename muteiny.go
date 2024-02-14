@@ -25,10 +25,12 @@ func SetMute(aev *wca.IAudioEndpointVolume, mute bool) error {
 	}
 	if currentMute != mute {
 		do(func() {
+			runtime.LockOSThread()
 			if err := aev.SetMute(mute, nil); err != nil {
 				// fmt.Println("this row is required, wtf?") //? If this row is not here, the program will crash when you try to mute the mic (it is not needed in golang 1.16)
 				return
 			}
+			runtime.UnlockOSThread()
 		})
 		if !mute {
 			systray.SetTemplateIcon(icons.Mic, icons.Mic)
@@ -65,12 +67,14 @@ func SetVolumeLevel(aev *wca.IAudioEndpointVolume, volumeLevel float32) error {
 var keyboardFlag KeyboardFlag
 var mouseDownFlag MouseFlag
 var mouseUpFlag MouseFlag
-var holdFlag HoldFlag = HoldFlag{Value: 150, IsSet: false}
+var mouseData MouseFlag
+var holdFlag HoldFlag = HoldFlag{Value: 500, IsSet: false}
 var volumeFlag bool
 
-func init() {
-	runtime.LockOSThread()
-}
+// Locked the whole program, moved to the setmute function instead.
+// func init() {
+// 	runtime.LockOSThread()
+// }
 
 // queue of work to run in main thread.
 var mainfunc = make(chan func())
@@ -98,7 +102,9 @@ func main() {
 	f.Var(&mouseDownFlag, "md", "Alias of -mousedown")
 	f.Var(&mouseUpFlag, "mouseup", "Specify mouse keybind in format 524 (up) !set both mouse up and down for it to work!")
 	f.Var(&mouseUpFlag, "mu", "Alias of -mouseup")
-	f.Var(&holdFlag, "holdtime", "Specify the time in milliseconds to keep the mic open after release (default 150)")
+	f.Var(&mouseData, "mousedata", "Specify mouse data in format 131072(mouse3)/65536(mouse4), else all data is accepted")
+	f.Var(&mouseData, "mdata", "Alias of -mousedata")
+	f.Var(&holdFlag, "holdtime", "Specify the time in milliseconds to keep the mic open after release (default 500)")
 	f.Var(&holdFlag, "h", "Alias of -holdtime")
 	f.BoolVar(&volumeFlag, "volume", false, "Set the volume to 0 instead of muting")
 	f.Parse(os.Args[1:])
@@ -170,6 +176,7 @@ func main() {
 	}
 
 	if mouseDownFlag.IsSet && mouseUpFlag.IsSet {
+		fmt.Println("Mouse mode active")
 		go func() {
 			if err := runMouse(aev, mouseDownFlag.Value, mouseUpFlag.Value); err != nil {
 				log.Fatal(err)
@@ -178,6 +185,7 @@ func main() {
 	}
 
 	if keyboardFlag.IsSet {
+		fmt.Println("Keyboard mode active")
 		go func() {
 			if err := runKeyboard(aev, keyboardFlag.Value); err != nil { //? Mouse3 Down: 523, Mouse3 Up: 524
 				log.Fatal(err)
@@ -261,22 +269,31 @@ func runMouse(aev *wca.IAudioEndpointVolume, mouseDown int, mouseUp int) error {
 			fmt.Println("Received shutdown signal")
 			return nil
 		case m := <-mouseChan:
+			//? Used to check for specific mouse data, eg. Mouse3 and Mouse4 have the same VK but different data
+			if mouseData.IsSet {
+				if mouseData.Value != int(m.MouseData) {
+					continue
+				}
+			}
+			// Check if the mouse event is the one we are looking for
 			keyNumber := int(m.Message)
 			if keyNumber == mouseDown {
-				fmt.Printf("Down %v\n", int(m.Message))
+				fmt.Printf("Down VK:%v Data:%v\n", int(m.Message), int(m.MouseData))
 				if !volumeFlag {
 					SetMute(aev, false)
 				} else {
 					SetVolumeLevel(aev, volumeLevel)
 				}
 			} else if keyNumber == mouseUp {
-				fmt.Printf("Up %v\n", int(m.Message))
-				time.Sleep(time.Duration(holdFlag.Value) * time.Millisecond)
-				if !volumeFlag {
-					SetMute(aev, true)
-				} else {
-					SetVolumeLevel(aev, 0)
-				}
+				fmt.Printf("Up VK:%v Data:%v\n", int(m.Message), int(m.MouseData))
+				go func() {
+					time.Sleep(time.Duration(holdFlag.Value) * time.Millisecond)
+					if !volumeFlag {
+						SetMute(aev, true)
+					} else {
+						SetVolumeLevel(aev, 0)
+					}
+				}()
 			}
 			continue
 		}
@@ -320,12 +337,14 @@ func runKeyboard(aev *wca.IAudioEndpointVolume, keybind string) error {
 					}
 				} else if fmt.Sprint(k.Message) == "WM_KEYUP" {
 					fmt.Printf("Up %v\n", k.VKCode)
-					time.Sleep(time.Duration(holdFlag.Value) * time.Millisecond)
-					if !volumeFlag {
-						SetMute(aev, true)
-					} else {
-						SetVolumeLevel(aev, 0)
-					}
+					go func() {
+						time.Sleep(time.Duration(holdFlag.Value) * time.Millisecond)
+						if !volumeFlag {
+							SetMute(aev, true)
+						} else {
+							SetVolumeLevel(aev, 0)
+						}
+					}()
 				}
 			}
 			continue

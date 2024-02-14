@@ -29,3 +29,4 @@ Usage of muteiny.exe:
 ```
 
 ./Muteiny.exe -k VK_G -md 523 -mu 524
+./Muteiny.exe -md 523 -mu 524 -h 450
