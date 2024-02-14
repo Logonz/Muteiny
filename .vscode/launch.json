@@ -10,7 +10,16 @@
       "request": "launch",
       "mode": "auto",
       "program": "${fileDirname}",
-      "args": ["-md", "523", "-mu", "524"]
+      "args": [
+        "-md",
+        "523",
+        "-mu",
+        "524",
+        "-mdata",
+        "131072", // Mouse 3
+        "-h",
+        "500"
+      ]
     }
   ]
 }
