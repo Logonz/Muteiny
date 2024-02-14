@@ -115,26 +115,26 @@ func main() {
 	if err := ole.CoInitializeEx(0, ole.COINIT_APARTMENTTHREADED); err != nil {
 		return
 	}
-	//defer ole.CoUninitialize()
+	defer ole.CoUninitialize()
 
 	var mmde *wca.IMMDeviceEnumerator
 	if err := wca.CoCreateInstance(wca.CLSID_MMDeviceEnumerator, 0, wca.CLSCTX_ALL, wca.IID_IMMDeviceEnumerator, &mmde); err != nil {
 		return
 	}
-	//defer mmde.Release()
+	defer mmde.Release()
 
 	//? Get the default communications device
 	var mmd *wca.IMMDevice
 	if err := mmde.GetDefaultAudioEndpoint(wca.ECapture, wca.DEVICE_STATE_ACTIVE, &mmd); err != nil {
 		return
 	}
-	//defer mmd.Release()
+	defer mmd.Release()
 
 	var ps *wca.IPropertyStore
 	if err := mmd.OpenPropertyStore(wca.STGM_READ, &ps); err != nil {
 		return
 	}
-	//defer ps.Release()
+	defer ps.Release()
 
 	//? Get the name of the communication device
 	var pv wca.PROPVARIANT
@@ -149,7 +149,7 @@ func main() {
 	if err := mmd.Activate(wca.IID_IAudioEndpointVolume, wca.CLSCTX_ALL, nil, &aev); err != nil {
 		return
 	}
-	//defer aev.Release()
+	defer aev.Release()
 
 	if bindMode {
 		fmt.Println("Bind mode active")
@@ -162,15 +162,15 @@ func main() {
 		holdFlag.IsSet = false
 		// ? Run the bind mode
 		go findBindMode()
-	} else {
-		// ? Set the hold time to 500ms if it's not set
-		if !holdFlag.IsSet {
-			holdFlag.Set("500")
-		}
 	}
 
 	var mute bool
 	if !bindMode {
+		// ? Set the hold time to 500ms if it's not set
+		if !holdFlag.IsSet {
+			holdFlag.Set("500")
+		}
+
 		if !volumeFlag {
 			// Mute the mic on startup
 			if err := aev.GetMute(&mute); err != nil {
