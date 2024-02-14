@@ -228,11 +228,27 @@ func onReady() {
 		systray.AddMenuItem("MouseDown: "+fmt.Sprint(mouseDownFlag.Value), "Hooked Mouse Button Down")
 		systray.AddMenuItem("MouseUp: "+fmt.Sprint(mouseUpFlag.Value), "Hooked Mouse Button Up")
 	}
+	if mouseData.IsSet {
+		systray.AddMenuItem("MouseData: "+fmt.Sprint(mouseData.Value), "Hooked Mouse Data")
+	}
 	if keyboardFlag.IsSet {
 		systray.AddMenuItem("Hooked Key: '"+keyboardFlag.Value+"'", "Hooked Keyboard Button")
 	}
 	systray.AddMenuItem("Hold Time: "+fmt.Sprint(holdFlag.Value)+"ms", "Mic Hold Time")
 
+	// Ctrl+C to quit
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt)
+	go func() {
+		<-signalChan
+		fmt.Println("Received shutdown signal")
+		close(mainfunc)
+		fmt.Println("Requesting quit")
+		systray.Quit()
+		fmt.Println("Finished quitting")
+	}()
+
+	// Quit button
 	mQuitOrig := systray.AddMenuItem("Quit", "Quit Muteify")
 	go func() {
 		<-mQuitOrig.ClickedCh
