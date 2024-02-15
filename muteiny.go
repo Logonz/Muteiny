@@ -45,15 +45,6 @@ func do(f func()) {
 	<-done
 }
 
-func GetMute(aev *wca.IAudioEndpointVolume) bool /*, error*/ {
-	var mute bool
-	if err := aev.GetMute(&mute); err != nil {
-		fmt.Println("Error getting mute state, returning", err)
-		return false //, err
-	}
-	return mute //, nil
-}
-
 func main() {
 	// ? This is a mutex to prevent multiple instances of the program from running at the same time.
 	closeMutex := InstanceMutex()
@@ -226,6 +217,15 @@ func onReady() {
 		<-mQuitOrig.ClickedCh
 		exit()
 	}()
+}
+
+func GetMute(aev *wca.IAudioEndpointVolume) bool /*, error*/ {
+	var mute bool
+	if err := aev.GetMute(&mute); err != nil {
+		fmt.Println("Error getting mute state, returning", err)
+		return false //, err
+	}
+	return mute //, nil
 }
 
 func SetMute(aev *wca.IAudioEndpointVolume, mute bool) error {
