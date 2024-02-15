@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime"
 	"time"
 
 	"github.com/getlantern/systray"
@@ -32,10 +33,28 @@ var holdFlag HoldFlag
 var volumeFlag bool
 var bindMode bool
 
+// Locked the whole program, moved to the setmute function instead.
+// func init() {
+// 	runtime.LockOSThread()
+// }
+
+// queue of work to run in main thread.
+var mainfunc = make(chan func())
+
+// do runs f on the main thread.
+func do(f func()) {
+	done := make(chan bool, 1)
+	mainfunc <- func() {
+		f()
+		done <- true
+	}
+	<-done
+}
+
 func GetMute(aev *wca.IAudioEndpointVolume) bool /*, error*/ {
 	var mute bool
 	if err := aev.GetMute(&mute); err != nil {
-		fmt.Println("Error getting mute state, returning false", err)
+		fmt.Println("Error getting mute state, returning", err)
 		return false //, err
 	}
 	return mute //, nil
@@ -145,7 +164,11 @@ func main() {
 		ole.CoUninitialize()
 	}
 
-	systray.Run(onReady, nil)
+	go systray.Run(onReady, nil)
+
+	for f := range mainfunc {
+		f()
+	}
 
 	if !bindMode {
 		InitOLE()
@@ -211,6 +234,7 @@ func onReady() {
 		<-signalChan
 		systrayActive = false
 		fmt.Println("Received shutdown signal")
+		close(mainfunc)
 		fmt.Println("Requesting quit")
 		systray.Quit()
 		fmt.Println("Finished quitting")
@@ -221,6 +245,7 @@ func onReady() {
 	go func() {
 		<-mQuitOrig.ClickedCh
 		systrayActive = false
+		close(mainfunc)
 		fmt.Println("Requesting quit")
 		systray.Quit()
 		fmt.Println("Finished quitting")
@@ -233,9 +258,14 @@ func SetMute(aev *wca.IAudioEndpointVolume, mute bool) error {
 		return err
 	}
 	if currentMute != mute {
-		if err := aev.SetMute(mute, nil); err != nil {
-			return err
-		}
+		do(func() {
+			runtime.LockOSThread()
+			if err := aev.SetMute(mute, nil); err != nil {
+				// fmt.Println("this row is required, wtf?") //? If this row is not here, the program will crash when you try to mute the mic (it is not needed in golang 1.16)
+				return
+			}
+			runtime.UnlockOSThread()
+		})
 		if systrayActive {
 			if !mute {
 				systray.SetTemplateIcon(icons.Mic, icons.Mic)
