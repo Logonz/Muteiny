@@ -26,6 +26,16 @@ Usage of muteiny.exe:
         Specify mouse keybind in format 524 (up) !set both mouse up and down for it to work!
   -mu value
         Alias of -mouseup
+  -mousedata value
+        Specify mouse data in format 131072(mouse3)/65536(mouse4), else all data is accepted
+  -mdata
+        Print mouse data
+  -keybindmode
+        Set the program to bind mode, this will not mute the mic but instead write the binds to the console/binds.log to help you find the correct VK/Mouse codes
+  -volume
+        Set the volume to 0 instead of muting (Note, this does not actually remove all sound, keeping this even though it isn't useful for the program anymore)
 ```
 
-./Muteiny.exe -k VK_G -md 523 -mu 524
+`./Muteiny.exe -k VK_G -md 523 -mu 524`
+`./Muteiny.exe -md 523 -mu 524 -h 450`
+`./Muteiny.exe -md 523 -mu 524 -mdata 131072 -h 500`
