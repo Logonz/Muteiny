@@ -32,24 +32,6 @@ var holdFlag HoldFlag
 var volumeFlag bool
 var bindMode bool
 
-// Locked the whole program, moved to the setmute function instead.
-// func init() {
-// 	runtime.LockOSThread()
-// }
-
-// queue of work to run in main thread.
-var mainfunc = make(chan func())
-
-// do runs f on the main thread.
-func do(f func()) {
-	done := make(chan bool, 1)
-	mainfunc <- func() {
-		f()
-		done <- true
-	}
-	<-done
-}
-
 func GetMute(aev *wca.IAudioEndpointVolume) bool /*, error*/ {
 	var mute bool
 	if err := aev.GetMute(&mute); err != nil {
@@ -163,11 +145,7 @@ func main() {
 		ole.CoUninitialize()
 	}
 
-	go systray.Run(onReady, nil)
-
-	for f := range mainfunc {
-		f()
-	}
+	systray.Run(onReady, nil)
 
 	if !bindMode {
 		InitOLE()
@@ -233,7 +211,6 @@ func onReady() {
 		<-signalChan
 		systrayActive = false
 		fmt.Println("Received shutdown signal")
-		close(mainfunc)
 		fmt.Println("Requesting quit")
 		systray.Quit()
 		fmt.Println("Finished quitting")
@@ -244,7 +221,6 @@ func onReady() {
 	go func() {
 		<-mQuitOrig.ClickedCh
 		systrayActive = false
-		close(mainfunc)
 		fmt.Println("Requesting quit")
 		systray.Quit()
 		fmt.Println("Finished quitting")
