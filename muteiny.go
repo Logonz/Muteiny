@@ -30,7 +30,6 @@ var mouseDownFlag MouseFlag
 var mouseUpFlag MouseFlag
 var mouseData MouseFlag
 var holdFlag HoldFlag
-var volumeFlag bool
 var bindMode bool
 
 // queue of work to run in main thread.
@@ -82,16 +81,13 @@ func main() {
 	// * Hold time
 	f.Var(&holdFlag, "holdtime", "Specify the time in milliseconds to keep the mic open after release (default 500)")
 	f.Var(&holdFlag, "h", "Alias of -holdtime")
-	// * Volume
-	f.BoolVar(&volumeFlag, "volume", false, "Set the volume to 0 instead of muting (Note, this does not actually remove all sound, keeping this even though it isn't useful for the program anymore)")
 	// * Bind mode
 	f.BoolVar(&bindMode, "keybindmode", false, "Set the program to bind mode, this will not mute the mic but instead write the binds to the console/binds.log to help you find the correct VK/Mouse codes")
 	f.Parse(os.Args[1:])
 
 	if bindMode {
 		fmt.Println("Bind mode active")
-		// ? Set the flags to false so the program doesn't run the mute/volume mode
-		volumeFlag = false
+		// ? Set the flags to false so the program doesn't run the mute mode
 		keyboardFlag.IsSet = false
 		mouseUpFlag.IsSet = false
 		mouseDownFlag.IsSet = false
@@ -119,19 +115,11 @@ func main() {
 		//? Fetch the default communications device
 		aev, release := GetDefaultDevice()
 
-		if !volumeFlag {
-			if !GetMute(aev) { //? Only call mute if the device is not muted
-				if err := SetMute(aev, true); err != nil {
-					fmt.Println("Error setting startup mute state", err)
-					return
-				}
-			}
-		} else {
-			if err := aev.SetMasterVolumeLevel(0, nil); err != nil {
+		if !GetMute(aev) { //? Only call mute if the device is not muted
+			if err := SetMute(aev, true); err != nil {
+				fmt.Println("Error setting startup mute state", err)
 				return
 			}
-			fmt.Println("Volume mode")
-			fmt.Println("Setting volume to 0!")
 		}
 		release()
 		ole.CoUninitialize()
@@ -167,33 +155,24 @@ func main() {
 
 	if !bindMode {
 		InitOLE()
-		if !volumeFlag {
-			// Restore the original mute state of the devices
-			fmt.Println("Setting mute to original state before shutdown!")
-			devices, releaseAll := GetAllDevices()
-			for deviceName, muteState := range deviceStatesMap {
-				if usedDevices[deviceName] {
-					if devices[deviceName] != nil {
-						fmt.Println("Restoring mute state for:", deviceName, "to:", muteState)
-						if muteState != GetMute(devices[deviceName]) { //? Only set the mute state if it's different from current state
-							if err := SetMute(devices[deviceName], muteState); err != nil {
-								fmt.Println("Error setting mute state for:", deviceName, err)
-							}
+		// Restore the original mute state of the devices
+		fmt.Println("Setting mute to original state before shutdown!")
+		devices, releaseAll := GetAllDevices()
+		for deviceName, muteState := range deviceStatesMap {
+			if usedDevices[deviceName] {
+				if devices[deviceName] != nil {
+					fmt.Println("Restoring mute state for:", deviceName, "to:", muteState)
+					if muteState != GetMute(devices[deviceName]) { //? Only set the mute state if it's different from current state
+						if err := SetMute(devices[deviceName], muteState); err != nil {
+							fmt.Println("Error setting mute state for:", deviceName, err)
 						}
-					} else {
-						fmt.Println("Device not found:", deviceName)
 					}
+				} else {
+					fmt.Println("Device not found:", deviceName)
 				}
 			}
-			releaseAll()
-		} else {
-			aev, release := GetDefaultDevice()
-			if err := aev.SetMasterVolumeLevel(volumeLevel, nil); err != nil {
-				return
-			}
-			release()
-			fmt.Println("Setting volume to original level before shutdown!")
 		}
+		releaseAll()
 		ole.CoUninitialize()
 	}
 }
@@ -276,29 +255,6 @@ func SetMuteThread(aev *wca.IAudioEndpointVolume, mute bool) error {
 	return nil
 }
 
-var volumeLevel float32
-
-func SetVolumeLevel(aev *wca.IAudioEndpointVolume, volumeLevel float32) error {
-	var currentVolumeLevel float32
-	if err := aev.GetMasterVolumeLevel(&currentVolumeLevel); err != nil {
-		return err
-	}
-	if currentVolumeLevel != volumeLevel {
-		if err := aev.SetMasterVolumeLevel(volumeLevel, nil); err != nil {
-			return err
-		}
-		if systrayActive {
-			if volumeLevel != 0 {
-				systray.SetTemplateIcon(icons.Mic, icons.Mic)
-			} else {
-				systray.SetTemplateIcon(icons.MicMute, icons.MicMute)
-			}
-		}
-		fmt.Printf("Volume Level set to:%v\n", volumeLevel)
-	}
-	return nil
-}
-
 func runMouse(mouseDown int, mouseUp int) error {
 
 	mouseChan := make(chan types.MouseEvent, 1)
@@ -333,11 +289,7 @@ func runMouse(mouseDown int, mouseUp int) error {
 				// We run this every time to make sure we have the correct device
 				aev, release := GetDefaultDevice()
 				fmt.Printf("Down VK:%v Data:%v\n", int(m.Message), int(m.MouseData))
-				if !volumeFlag {
-					SetMuteThread(aev, false)
-				} else {
-					SetVolumeLevel(aev, volumeLevel)
-				}
+				SetMuteThread(aev, false)
 				release()
 			} else if keyNumber == mouseUp {
 				// We run this every time to make sure we have the correct device
@@ -346,11 +298,7 @@ func runMouse(mouseDown int, mouseUp int) error {
 				// ? We run this goroutine because otherwise we lock the main thread causing lag due to the time.sleep
 				go func() {
 					time.Sleep(time.Duration(holdFlag.Value) * time.Millisecond)
-					if !volumeFlag {
-						SetMuteThread(aev, true)
-					} else {
-						SetVolumeLevel(aev, 0)
-					}
+					SetMuteThread(aev, true)
 					release()
 				}()
 			}
@@ -389,11 +337,7 @@ func runKeyboard(keybind string) error {
 					// We run this every time to make sure we have the correct device
 					aev, release := GetDefaultDevice()
 					fmt.Printf("Down %v\n", k.VKCode)
-					if !volumeFlag {
-						SetMuteThread(aev, false)
-					} else {
-						SetVolumeLevel(aev, volumeLevel)
-					}
+					SetMuteThread(aev, false)
 					release()
 				} else if fmt.Sprint(k.Message) == "WM_KEYUP" && lastWMState != "up" {
 					// We run this every time to make sure we have the correct device
@@ -401,11 +345,7 @@ func runKeyboard(keybind string) error {
 					fmt.Printf("Up %v\n", k.VKCode)
 					go func() {
 						time.Sleep(time.Duration(holdFlag.Value) * time.Millisecond)
-						if !volumeFlag {
-							SetMute(aev, true)
-						} else {
-							SetVolumeLevel(aev, 0)
-						}
+						SetMute(aev, true)
 						release()
 						lastWMState = "up"
 					}()
@@ -511,6 +451,28 @@ func findBindMode() {
 // 			systray.SetTemplateIcon(icons.MicMute, icons.MicMute)
 // 		}
 // 		fmt.Printf("Mute State set to:%v\n", mute)
+// 	}
+// 	return nil
+// }
+
+// Old Volume code kept for reference
+// func SetVolumeLevel(aev *wca.IAudioEndpointVolume, volumeLevel float32) error {
+// 	var currentVolumeLevel float32
+// 	if err := aev.GetMasterVolumeLevel(&currentVolumeLevel); err != nil {
+// 		return err
+// 	}
+// 	if currentVolumeLevel != volumeLevel {
+// 		if err := aev.SetMasterVolumeLevel(volumeLevel, nil); err != nil {
+// 			return err
+// 		}
+// 		if systrayActive {
+// 			if volumeLevel != 0 {
+// 				systray.SetTemplateIcon(icons.Mic, icons.Mic)
+// 			} else {
+// 				systray.SetTemplateIcon(icons.MicMute, icons.MicMute)
+// 			}
+// 		}
+// 		fmt.Printf("Volume Level set to:%v\n", volumeLevel)
 // 	}
 // 	return nil
 // }

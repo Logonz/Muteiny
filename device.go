@@ -81,13 +81,7 @@ func GetAllDevices() (map[string]*wca.IAudioEndpointVolume, func()) {
 			fmt.Println("Error activating audio endpoint", err)
 			os.Exit(1)
 		}
-		// var mute bool
-		// err := aev.GetMute(&mute)
-		// if err != nil {
-		// 	fmt.Println("Error getting mute", err)
-		// 	os.Exit(1)
-		// }
-		// fmt.Println(inputDevice, mute)
+
 		releaseFuncs = append(releaseFuncs, func() {
 			pDevice.Release()
 			ps.Release()
@@ -106,14 +100,6 @@ func GetAllDevices() (map[string]*wca.IAudioEndpointVolume, func()) {
 
 func GetDefaultDevice() (*wca.IAudioEndpointVolume, func()) {
 	// //? Here start the fetching of the default communications device
-	// if err := ole.CoInitializeEx(0, ole.COINIT_MULTITHREADED); err != nil {
-	// 	fmt.Println("Error initializing COM", err)
-	// 	os.Exit(1)
-	// }
-	// if err := ole.CoInitialize(0); err != nil {
-	// 	fmt.Println("Error initializing COM", err)
-	// 	os.Exit(1)
-	// }
 
 	var mmde *wca.IMMDeviceEnumerator
 	if err := wca.CoCreateInstance(wca.CLSID_MMDeviceEnumerator, 0, wca.CLSCTX_ALL, wca.IID_IMMDeviceEnumerator, &mmde); err != nil {

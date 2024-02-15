@@ -32,8 +32,6 @@ Usage of muteiny.exe:
         Print mouse data
   -keybindmode
         Set the program to bind mode, this will not mute the mic but instead write the binds to the console/binds.log to help you find the correct VK/Mouse codes
-  -volume
-        Set the volume to 0 instead of muting (Note, this does not actually remove all sound, keeping this even though it isn't useful for the program anymore)
 ```
 
 `./Muteiny.exe -k VK_G -md 523 -mu 524`
