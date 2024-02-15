@@ -33,11 +33,6 @@ var holdFlag HoldFlag
 var volumeFlag bool
 var bindMode bool
 
-// Locked the whole program, moved to the setmute function instead.
-// func init() {
-// 	runtime.LockOSThread()
-// }
-
 // queue of work to run in main thread.
 var mainfunc = make(chan func())
 
@@ -112,7 +107,6 @@ func main() {
 
 		// Initialize OLE for this thread
 		InitOLE()
-		// defer ole.CoUninitialize()
 
 		// ? Get all the devices and their mute state
 		devices, releaseAll := GetAllDevices()
@@ -122,14 +116,15 @@ func main() {
 			deviceStatesMap[k] = mute
 		}
 		releaseAll()
-
 		//? Fetch the default communications device
 		aev, release := GetDefaultDevice()
 
 		if !volumeFlag {
-			if err := SetMute(aev, true); err != nil {
-				fmt.Println("Error setting startup mute state", err)
-				return
+			if !GetMute(aev) { //? Only call mute if the device is not muted
+				if err := SetMute(aev, true); err != nil {
+					fmt.Println("Error setting startup mute state", err)
+					return
+				}
 			}
 		} else {
 			if err := aev.SetMasterVolumeLevel(0, nil); err != nil {
@@ -138,12 +133,14 @@ func main() {
 			fmt.Println("Volume mode")
 			fmt.Println("Setting volume to 0!")
 		}
+		release()
+		ole.CoUninitialize()
 
 		if mouseDownFlag.IsSet && mouseUpFlag.IsSet {
 			fmt.Println("Mouse mode active")
 			go func() {
 				InitOLE()
-				if err := runMouse(aev, mouseDownFlag.Value, mouseUpFlag.Value); err != nil {
+				if err := runMouse(mouseDownFlag.Value, mouseUpFlag.Value); err != nil { //? Mouse3 Down: 523, Mouse3 Up: 524
 					log.Fatal(err)
 				}
 				ole.CoUninitialize()
@@ -154,14 +151,12 @@ func main() {
 			fmt.Println("Keyboard mode active")
 			go func() {
 				InitOLE()
-				if err := runKeyboard(aev, keyboardFlag.Value); err != nil { //? Mouse3 Down: 523, Mouse3 Up: 524
+				if err := runKeyboard(keyboardFlag.Value); err != nil {
 					log.Fatal(err)
 				}
 				ole.CoUninitialize()
 			}()
 		}
-		release()
-		ole.CoUninitialize()
 	}
 
 	go systray.Run(onReady, nil)
@@ -180,8 +175,10 @@ func main() {
 				if usedDevices[deviceName] {
 					if devices[deviceName] != nil {
 						fmt.Println("Restoring mute state for:", deviceName, "to:", muteState)
-						if err := SetMute(devices[deviceName], muteState); err != nil {
-							fmt.Println("Error setting mute state for:", deviceName, err)
+						if muteState != GetMute(devices[deviceName]) { //? Only set the mute state if it's different from current state
+							if err := SetMute(devices[deviceName], muteState); err != nil {
+								fmt.Println("Error setting mute state for:", deviceName, err)
+							}
 						}
 					} else {
 						fmt.Println("Device not found:", deviceName)
@@ -199,6 +196,15 @@ func main() {
 		}
 		ole.CoUninitialize()
 	}
+}
+
+func exit() {
+	systrayActive = false
+	fmt.Println("Received shutdown signal")
+	close(mainfunc)
+	fmt.Println("Requesting quit")
+	systray.Quit()
+	fmt.Println("Finished quitting")
 }
 
 func onReady() {
@@ -232,38 +238,30 @@ func onReady() {
 	signal.Notify(signalChan, os.Interrupt)
 	go func() {
 		<-signalChan
-		systrayActive = false
-		fmt.Println("Received shutdown signal")
-		close(mainfunc)
-		fmt.Println("Requesting quit")
-		systray.Quit()
-		fmt.Println("Finished quitting")
+		exit()
 	}()
 
 	// Quit button
 	mQuitOrig := systray.AddMenuItem("Quit", "Quit Muteify")
 	go func() {
 		<-mQuitOrig.ClickedCh
-		systrayActive = false
-		close(mainfunc)
-		fmt.Println("Requesting quit")
-		systray.Quit()
-		fmt.Println("Finished quitting")
+		exit()
 	}()
 }
 
 func SetMute(aev *wca.IAudioEndpointVolume, mute bool) error {
-	var currentMute bool
-	if err := aev.GetMute(&currentMute); err != nil {
+	if err := aev.SetMute(mute, nil); err != nil {
 		return err
 	}
+	return nil
+}
+
+func SetMuteThread(aev *wca.IAudioEndpointVolume, mute bool) error {
+	currentMute := GetMute(aev)
 	if currentMute != mute {
 		do(func() {
 			runtime.LockOSThread()
-			if err := aev.SetMute(mute, nil); err != nil {
-				// fmt.Println("this row is required, wtf?") //? If this row is not here, the program will crash when you try to mute the mic (it is not needed in golang 1.16)
-				return
-			}
+			SetMute(aev, mute)
 			runtime.UnlockOSThread()
 		})
 		if systrayActive {
@@ -301,7 +299,7 @@ func SetVolumeLevel(aev *wca.IAudioEndpointVolume, volumeLevel float32) error {
 	return nil
 }
 
-func runMouse(aevv *wca.IAudioEndpointVolume, mouseDown int, mouseUp int) error {
+func runMouse(mouseDown int, mouseUp int) error {
 
 	mouseChan := make(chan types.MouseEvent, 1)
 
@@ -336,7 +334,7 @@ func runMouse(aevv *wca.IAudioEndpointVolume, mouseDown int, mouseUp int) error 
 				aev, release := GetDefaultDevice()
 				fmt.Printf("Down VK:%v Data:%v\n", int(m.Message), int(m.MouseData))
 				if !volumeFlag {
-					SetMute(aev, false)
+					SetMuteThread(aev, false)
 				} else {
 					SetVolumeLevel(aev, volumeLevel)
 				}
@@ -349,7 +347,7 @@ func runMouse(aevv *wca.IAudioEndpointVolume, mouseDown int, mouseUp int) error 
 				go func() {
 					time.Sleep(time.Duration(holdFlag.Value) * time.Millisecond)
 					if !volumeFlag {
-						SetMute(aev, true)
+						SetMuteThread(aev, true)
 					} else {
 						SetVolumeLevel(aev, 0)
 					}
@@ -361,7 +359,7 @@ func runMouse(aevv *wca.IAudioEndpointVolume, mouseDown int, mouseUp int) error 
 	}
 }
 
-func runKeyboard(aev *wca.IAudioEndpointVolume, keybind string) error {
+func runKeyboard(keybind string) error {
 	keyboardChan := make(chan types.KeyboardEvent, 1)
 
 	if err := keyboard.Install(nil, keyboardChan); err != nil {
@@ -375,11 +373,8 @@ func runKeyboard(aev *wca.IAudioEndpointVolume, keybind string) error {
 
 	fmt.Println("Start capturing keyboard input")
 
-	var mute bool
-	if err := aev.GetMute(&mute); err != nil {
-		return err
-	}
-	fmt.Printf("Mute State: %v\n", mute)
+	// We keep track of it so not to spam the down event
+	var lastWMState string = ""
 
 	for {
 		select {
@@ -389,14 +384,20 @@ func runKeyboard(aev *wca.IAudioEndpointVolume, keybind string) error {
 		case k := <-keyboardChan:
 			// fmt.Printf("Received %v %v\n", k.Message, k.VKCode)
 			if fmt.Sprint(k.VKCode) == keybind {
-				if fmt.Sprint(k.Message) == "WM_KEYDOWN" {
+				if fmt.Sprint(k.Message) == "WM_KEYDOWN" && lastWMState != "down" {
+					lastWMState = "down"
+					// We run this every time to make sure we have the correct device
+					aev, release := GetDefaultDevice()
 					fmt.Printf("Down %v\n", k.VKCode)
 					if !volumeFlag {
-						SetMute(aev, false)
+						SetMuteThread(aev, false)
 					} else {
 						SetVolumeLevel(aev, volumeLevel)
 					}
-				} else if fmt.Sprint(k.Message) == "WM_KEYUP" {
+					release()
+				} else if fmt.Sprint(k.Message) == "WM_KEYUP" && lastWMState != "up" {
+					// We run this every time to make sure we have the correct device
+					aev, release := GetDefaultDevice()
 					fmt.Printf("Up %v\n", k.VKCode)
 					go func() {
 						time.Sleep(time.Duration(holdFlag.Value) * time.Millisecond)
@@ -405,6 +406,8 @@ func runKeyboard(aev *wca.IAudioEndpointVolume, keybind string) error {
 						} else {
 							SetVolumeLevel(aev, 0)
 						}
+						release()
+						lastWMState = "up"
 					}()
 				}
 			}
